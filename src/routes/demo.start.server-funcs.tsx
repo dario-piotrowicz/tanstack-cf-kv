@@ -1,23 +1,21 @@
-import fs from 'node:fs'
+import assert from 'node:assert'
+import { env } from 'cloudflare:workers'
 import { useCallback, useState } from 'react'
 import { createFileRoute, useRouter } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 
-const filePath = 'todos.json'
-
 async function readTodos() {
-  return JSON.parse(
-    await fs.promises.readFile(filePath, 'utf-8').catch(() =>
-      JSON.stringify(
-        [
-          { id: 1, name: 'Get groceries' },
-          { id: 2, name: 'Buy a new phone' },
-        ],
-        null,
-        2,
-      ),
-    ),
-  )
+  const kvEntries = await env.MY_KV.list()
+  const kvKeys = kvEntries.keys.map(entry => entry.name)
+
+  return await Promise.all(kvKeys.map(async key => {
+    const value = await env.MY_KV.get(key)
+    assert(value)
+    return {
+      id: key,
+      name: value
+    }
+  }))
 }
 
 const getTodos = createServerFn({
@@ -28,8 +26,9 @@ const addTodo = createServerFn({ method: 'POST' })
   .inputValidator((d: string) => d)
   .handler(async ({ data }) => {
     const todos = await readTodos()
-    todos.push({ id: todos.length + 1, name: data })
-    await fs.promises.writeFile(filePath, JSON.stringify(todos, null, 2))
+    const id = `${todos.length + 1}`;
+    todos.push({ id, name: data })
+    await env.MY_KV.put(`${id}`, data)
     return todos
   })
 
